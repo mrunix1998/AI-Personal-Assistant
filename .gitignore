@@ -1,0 +1,9 @@
+.env
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+postgres_data/
+node_modules/
+dist/
+build/
