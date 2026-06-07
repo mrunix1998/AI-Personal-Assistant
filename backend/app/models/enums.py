@@ -11,6 +11,7 @@ class ProviderName(StrEnum):
     MICROSOFT_CALENDAR = "microsoft_calendar"
     APPLE_CALENDAR = "apple_calendar"
     CALDAV = "caldav"
+    LOCAL_TASKS = "local_tasks"
     TODOIST = "todoist"
     MICROSOFT_TODO = "microsoft_todo"
     NOTION = "notion"

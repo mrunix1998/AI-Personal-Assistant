@@ -1,0 +1,59 @@
+{
+  "name": "AI Planning - Rule Based",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-planning",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "Webhook_AI_Planning",
+      "name": "AI Planning Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 300],
+      "webhookId": "ai-planning-rule-based"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\nconst context = body.planning_context || {};\nconst date = body.agenda_date || context.date;\nconst minBreak = Number(context?.planning_window?.min_break_minutes ?? 15);\n\nconst priorityWeight = { urgent: 0, high: 1, medium: 2, low: 3 };\nconst slots = (context.free_slots || []).map(slot => ({\n  start: new Date(slot.start),\n  end: new Date(slot.end),\n  label: slot.label,\n  duration_minutes: Number(slot.duration_minutes || 0),\n}));\n\nconst tasks = (context.tasks || [])\n  .filter(task => !task.is_completed)\n  .sort((a, b) => {\n    const pa = priorityWeight[a.priority || 'medium'] ?? 2;\n    const pb = priorityWeight[b.priority || 'medium'] ?? 2;\n    if (pa !== pb) return pa - pb;\n    const da = a.due_at ? new Date(a.due_at).getTime() : Number.MAX_SAFE_INTEGER;\n    const db = b.due_at ? new Date(b.due_at).getTime() : Number.MAX_SAFE_INTEGER;\n    if (da !== db) return da - db;\n    return String(a.title).localeCompare(String(b.title));\n  });\n\nfunction addMinutes(dateValue, minutes) {\n  return new Date(dateValue.getTime() + minutes * 60 * 1000);\n}\n\nconst plannedTasks = [];\nconst unscheduledTasks = [];\n\nfor (const task of tasks) {\n  const duration = Math.max(15, Math.min(Number(task.estimated_duration_minutes || 60), 480));\n  let placed = false;\n\n  for (let i = 0; i < slots.length; i++) {\n    const slot = slots[i];\n    const availableMinutes = Math.floor((slot.end.getTime() - slot.start.getTime()) / 60000);\n    if (availableMinutes < duration) continue;\n\n    const scheduledStart = new Date(slot.start);\n    const scheduledEnd = addMinutes(scheduledStart, duration);\n\n    plannedTasks.push({\n      task_id: task.id,\n      title: task.title,\n      priority: task.priority || 'medium',\n      estimated_duration_minutes: duration,\n      due_at: task.due_at || null,\n      scheduled_start: scheduledStart.toISOString(),\n      scheduled_end: scheduledEnd.toISOString(),\n      source: 'n8n_rule_based_planner',\n    });\n\n    const nextStart = addMinutes(scheduledEnd, minBreak);\n    if (nextStart >= slot.end) {\n      slots.splice(i, 1);\n    } else {\n      slots[i] = { ...slot, start: nextStart };\n    }\n\n    placed = true;\n    break;\n  }\n\n  if (!placed) {\n    unscheduledTasks.push({\n      task_id: task.id,\n      title: task.title,\n      priority: task.priority || 'medium',\n      estimated_duration_minutes: duration,\n      due_at: task.due_at || null,\n      reason: 'No free slot long enough inside the planning window.',\n    });\n  }\n}\n\nconst plan = {\n  date,\n  planning_window: context.planning_window || {},\n  stats: {\n    event_count: (context.events || []).length,\n    task_count: tasks.length,\n    planned_task_count: plannedTasks.length,\n    unscheduled_task_count: unscheduledTasks.length,\n    original_free_slot_count: (context.free_slots || []).length,\n  },\n  schedule: plannedTasks,\n  unscheduled_tasks: unscheduledTasks,\n  assistant_message: plannedTasks.length\n    ? `I scheduled ${plannedTasks.length} task(s) using the n8n rule-based planner.`\n    : 'I could not schedule any tasks into the available free slots.',\n};\n\nreturn [{\n  json: {\n    status: 'generated',\n    source: 'n8n_rule_based',\n    user_id: body.user_id,\n    user_email: body.user_email,\n    agenda_date: date,\n    plan,\n  }\n}];"
+      },
+      "id": "Rule_Based_Planner",
+      "name": "Rule Based Planner",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "Respond_To_Backend",
+      "name": "Respond to Backend",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [780, 300]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "AI Planning Webhook": {
+      "main": [[{"node": "Rule Based Planner", "type": "main", "index": 0}]]
+    },
+    "Rule Based Planner": {
+      "main": [[{"node": "Respond to Backend", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "step-11-rule-based",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "AIPlanningRuleBased"
+}

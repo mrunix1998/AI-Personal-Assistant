@@ -12,6 +12,8 @@ class ExternalCalendarEvent:
     description: str | None = None
     location: str | None = None
     timezone: str | None = None
+    external_calendar_id: str | None = None
+    external_calendar_name: str | None = None
 
 
 class CalendarProvider(ABC):

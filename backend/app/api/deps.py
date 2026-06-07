@@ -27,3 +27,7 @@ def get_current_user(
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user
+
+
+def get_current_access_token(token: str = Depends(oauth2_scheme)) -> str:
+    return token

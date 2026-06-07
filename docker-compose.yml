@@ -15,6 +15,28 @@ services:
     ports:
       - "6379:6379"
 
+  n8n:
+    image: n8nio/n8n:2.25.5
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://localhost:5678/
+      GENERIC_TIMEZONE: Europe/Berlin
+      TZ: Europe/Berlin
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-change-me-please-change-me-32chars}
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-admin123456}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/workflows
+    depends_on:
+      - postgres
+      - redis
+
   backend:
     build:
       context: ./backend
@@ -28,6 +50,8 @@ services:
     depends_on:
       - postgres
       - redis
+      - n8n
 
 volumes:
   postgres_data:
+  n8n_data:

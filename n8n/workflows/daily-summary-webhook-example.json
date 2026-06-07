@@ -1,0 +1,61 @@
+{
+  "name": "AI Personal Assistant - Daily Summary Webhook Example",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "daily-summary",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "WebhookDailySummary",
+      "name": "Webhook - Daily Summary",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.body.backend_base_url + '/api/v1/agenda/daily-summary?agenda_date=' + $json.body.agenda_date}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{$json.headers.authorization}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "FetchBackendDailySummary",
+      "name": "Fetch Daily Summary from Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { status: 'ok', source: 'n8n', user_email: $node['Webhook - Daily Summary'].json.body.user_email, agenda_date: $node['Webhook - Daily Summary'].json.body.agenda_date, daily_summary: $json } }];"
+      },
+      "id": "FormatResponse",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Daily Summary": {
+      "main": [[{"node": "Fetch Daily Summary from Backend", "type": "main", "index": 0}]]
+    },
+    "Fetch Daily Summary from Backend": {
+      "main": [[{"node": "Format Response", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "local-example"
+}
