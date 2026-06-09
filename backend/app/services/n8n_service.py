@@ -157,3 +157,36 @@ class N8nWorkflowService:
                 return response.json()
             return {"raw_response": response.text}
 
+
+
+    async def trigger_email_daily_agenda_workflow(
+        self,
+        *,
+        user_id: UUID,
+        user_email: str,
+        agenda_date: date,
+        access_token: str,
+    ) -> Any:
+        url = f"{self.settings.n8n_base_url.rstrip('/')}/{self.settings.n8n_email_agenda_webhook_path.lstrip('/')}"
+        payload = {
+            "event": "email_daily_agenda_requested",
+            "user_id": str(user_id),
+            "user_email": user_email,
+            "agenda_date": agenda_date.isoformat(),
+            "backend_base_url": "http://backend:8000",
+            # n8n does not receive SMTP secrets. It calls backend, and backend reads encrypted secrets from DB.
+            "access_token": access_token,
+        }
+        headers = {
+            "X-N8N-Webhook-Secret": self.settings.n8n_webhook_secret,
+            "Authorization": f"Bearer {access_token}",
+        }
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+
+            content_type = response.headers.get("content-type", "")
+            if "application/json" in content_type:
+                return response.json()
+            return {"raw_response": response.text}
