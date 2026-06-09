@@ -3,6 +3,8 @@ from app.models.connected_account import ConnectedAccount
 from app.models.reminder import Reminder
 from app.models.planning_result import PlanningResult
 from app.models.task_item import TaskItem
+from app.models.notification_channel import NotificationChannel
+from app.models.provider_secret import ProviderSecret
 from app.models.user import User
 
-__all__ = ["CalendarEvent", "ConnectedAccount", "Reminder", "PlanningResult", "TaskItem", "User"]
+__all__ = ["CalendarEvent", "ConnectedAccount", "Reminder", "PlanningResult", "TaskItem", "NotificationChannel", "ProviderSecret", "User"]

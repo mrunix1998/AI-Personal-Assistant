@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     n8n_daily_summary_webhook_path: str = "/webhook/daily-summary"
     n8n_ai_planning_webhook_path: str = "/webhook/ai-planning"
     n8n_unified_agenda_webhook_path: str = "/webhook/unified-agenda"
+    n8n_telegram_agenda_webhook_path: str = "/webhook/telegram-daily-agenda"
     n8n_webhook_secret: str = "local-dev-secret"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

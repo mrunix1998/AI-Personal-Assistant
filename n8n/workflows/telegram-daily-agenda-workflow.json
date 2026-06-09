@@ -1,0 +1,69 @@
+{
+  "name": "Telegram Daily Agenda Sender - DB Token Fixed",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telegram-daily-agenda",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "Webhook_Telegram_Daily_Agenda",
+      "name": "Telegram Daily Agenda Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body || input;\n\nconst chatId = String(body.telegram_chat_id || '').trim();\nconst botToken = String(body.telegram_bot_token || '').trim();\n\nlet text = '';\nif (typeof body.telegram_text === 'string') {\n  text = body.telegram_text;\n} else if (body.telegram_message && typeof body.telegram_message.message === 'string') {\n  text = body.telegram_message.message;\n} else if (body.unified_agenda) {\n  const agenda = body.unified_agenda;\n  text = `Daily agenda for ${agenda.date || body.agenda_date}: ${agenda.stats?.total_count || 0} items.`;\n}\n\ntext = String(text || `Daily agenda for ${body.agenda_date}: no message generated.`);\n\nif (!botToken) {\n  throw new Error('Missing telegram_bot_token in webhook payload. Save the bot token in backend DB and pass it from FastAPI.');\n}\nif (!chatId) {\n  throw new Error('Missing telegram_chat_id in webhook payload. Connect Telegram chat_id first.');\n}\nif (!text.trim()) {\n  throw new Error('Telegram message text is empty.');\n}\n\nreturn [{\n  json: {\n    status: 'prepared',\n    source: 'n8n_telegram_daily_agenda',\n    user_id: body.user_id,\n    user_email: body.user_email,\n    agenda_date: body.agenda_date,\n    bot_token: botToken,\n    chat_id: chatId,\n    text\n  }\n}];"
+      },
+      "id": "Prepare_Telegram_Message",
+      "name": "Prepare Telegram Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{\"https://api.telegram.org/bot\" + $json.bot_token + \"/sendMessage\"}}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { chat_id: $json.chat_id, text: $json.text, disable_web_page_preview: true } }}",
+        "options": {}
+      },
+      "id": "Send_Telegram_Message",
+      "name": "Send Telegram Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [800, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const telegramResponse = $input.first().json;\nreturn [{\n  json: {\n    status: 'sent',\n    source: 'n8n_telegram_daily_agenda',\n    telegram_response: telegramResponse\n  }\n}];"
+      },
+      "id": "Return_Result",
+      "name": "Return Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 300]
+    }
+  ],
+  "connections": {
+    "Telegram Daily Agenda Webhook": {
+      "main": [[{"node": "Prepare Telegram Message", "type": "main", "index": 0}]]
+    },
+    "Prepare Telegram Message": {
+      "main": [[{"node": "Send Telegram Message", "type": "main", "index": 0}]]
+    },
+    "Send Telegram Message": {
+      "main": [[{"node": "Return Result", "type": "main", "index": 0}]]
+    }
+  },
+  "pinData": {},
+  "settings": {"executionOrder": "v1"},
+  "staticData": null,
+  "tags": []
+}

@@ -105,4 +105,55 @@ class N8nWorkflowService:
             if "application/json" in content_type:
                 return response.json()
             return {"raw_response": response.text}
+    async def trigger_telegram_daily_agenda_workflow(
+        self,
+        *,
+        user_id: UUID,
+        user_email: str,
+        agenda_date: date,
+        access_token: str,
+        telegram_chat_id: str,
+        telegram_bot_token: str,
+        unified_agenda: dict,
+    ) -> Any:
+        url = f"{self.settings.n8n_base_url.rstrip('/')}/{self.settings.n8n_telegram_agenda_webhook_path.lstrip('/')}"
+        telegram_message_obj = None
+        for message in unified_agenda.get("channel_messages", []):
+            if message.get("channel") == "telegram":
+                telegram_message_obj = message
+                break
+
+        telegram_text = ""
+        if isinstance(telegram_message_obj, dict):
+            telegram_text = str(telegram_message_obj.get("message") or "")
+        if not telegram_text:
+            telegram_text = f"Daily agenda for {agenda_date.isoformat()} is ready."
+
+        payload = {
+            "event": "telegram_daily_agenda_requested",
+            "user_id": str(user_id),
+            "user_email": user_email,
+            "agenda_date": agenda_date.isoformat(),
+            "backend_base_url": "http://backend:8000",
+            # Secret comes from encrypted DB storage and is passed only to this internal workflow call.
+            # It is not stored inside the n8n workflow JSON and should not be logged.
+            "telegram_bot_token": telegram_bot_token,
+            "telegram_chat_id": telegram_chat_id,
+            "telegram_text": telegram_text,
+            "telegram_message": telegram_message_obj,
+            "unified_agenda": unified_agenda,
+        }
+        headers = {
+            "X-N8N-Webhook-Secret": self.settings.n8n_webhook_secret,
+            "Authorization": f"Bearer {access_token}",
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+
+            content_type = response.headers.get("content-type", "")
+            if "application/json" in content_type:
+                return response.json()
+            return {"raw_response": response.text}
 
