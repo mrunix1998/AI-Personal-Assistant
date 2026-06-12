@@ -1,7 +1,5 @@
 from app.db.session import Base, engine
-from app import models  # noqa: F401 - imports model metadata
-
+from app.models import user, connected_account, calendar_event, task_item, reminder, notification_channel, provider_secret, notification, web_push_subscription  # noqa
 
 def init_db() -> None:
-    # MVP only. In production we will switch this to Alembic migrations.
     Base.metadata.create_all(bind=engine)

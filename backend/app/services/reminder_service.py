@@ -20,14 +20,14 @@ class ReminderService:
         skipped_count = 0
 
         for event in events:
-            scheduled_for = event.starts_at - timedelta(minutes=lead_minutes)
+            remind_at = event.starts_at - timedelta(minutes=lead_minutes)
             now = datetime.now(timezone.utc)
-            if scheduled_for.tzinfo is None:
-                scheduled_for_cmp = scheduled_for.replace(tzinfo=timezone.utc)
+            if remind_at.tzinfo is None:
+                remind_at_cmp = remind_at.replace(tzinfo=timezone.utc)
             else:
-                scheduled_for_cmp = scheduled_for
+                remind_at_cmp = remind_at
 
-            if scheduled_for_cmp < now:
+            if remind_at_cmp < now:
                 skipped_count += 1
                 continue
 
@@ -36,11 +36,11 @@ class ReminderService:
             if event.location:
                 message += f" Location: {event.location}."
 
-            if self.repo.exists_for_user_at_time(user_id=user_id, title=title, scheduled_for=scheduled_for):
+            if self.repo.exists_for_user_at_time(user_id=user_id, title=title, remind_at=remind_at):
                 skipped_count += 1
                 continue
 
-            created.append(self.repo.create(user_id=user_id, title=title, message=message, scheduled_for=scheduled_for))
+            created.append(self.repo.create(user_id=user_id, title=title, message=message, remind_at=remind_at))
 
         return created, skipped_count
 

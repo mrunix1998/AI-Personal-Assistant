@@ -1,47 +1,10 @@
 {
-  "name": "Unified Daily Agenda Notification Example",
+  "name": "Unified Agenda Notification Formatter",
   "nodes": [
-    {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "unified-agenda",
-        "responseMode": "lastNode",
-        "options": {}
-      },
-      "id": "Webhook_Unified_Agenda",
-      "name": "Unified Agenda Webhook",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
-      "position": [240, 300]
-    },
-    {
-      "parameters": {
-        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst agenda = body.unified_agenda;\nconst messages = agenda.channel_messages || [];\nconst email = messages.find(m => m.channel === 'email');\nconst telegram = messages.find(m => m.channel === 'telegram');\nconst whatsapp = messages.find(m => m.channel === 'whatsapp');\nreturn [{\n  json: {\n    status: 'ready_to_send',\n    source: 'n8n_unified_agenda',\n    user_id: body.user_id,\n    user_email: body.user_email,\n    agenda_date: body.agenda_date,\n    stats: agenda.stats,\n    // In production connect these to Email/Telegram/WhatsApp nodes.\n    email_message: email,\n    telegram_message: telegram,\n    whatsapp_message: whatsapp\n  }\n}];"
-      },
-      "id": "Prepare_Channel_Messages",
-      "name": "Prepare Channel Messages",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [520, 300]
-    }
+    {"parameters": {"httpMethod": "POST", "path": "unified-agenda-notification", "responseMode": "lastNode", "options": {}}, "id": "webhook", "name": "Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [0, 0]},
+    {"parameters": {"jsCode": "const b=$json.body||$json; const agenda=b.unified_agenda; return [{json:{status:'ok',source:'n8n',agenda_date:b.agenda_date,summary:agenda?.channel_messages?.[0]?.message || 'No agenda'}}];"}, "id": "response", "name": "Return Response", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [260, 0]}
   ],
-  "connections": {
-    "Unified Agenda Webhook": {
-      "main": [
-        [
-          {
-            "node": "Prepare Channel Messages",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    }
-  },
-  "pinData": {},
-  "settings": {
-    "executionOrder": "v1"
-  },
-  "staticData": null,
-  "tags": []
+  "connections": {"Webhook": {"main": [[{"node": "Return Response", "type": "main", "index": 0}]]}},
+  "active": false,
+  "settings": {"executionOrder": "v1"}
 }

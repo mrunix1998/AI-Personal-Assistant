@@ -4,7 +4,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.integrations.calendars.base import ExternalCalendarEvent
-from app.models.calendar_event import CalendarEvent
+from app.models.calendar_events import CalendarEvent
 from app.models.enums import ProviderName
 
 
@@ -46,8 +46,8 @@ class CalendarEventRepository:
                     connected_account_id=connected_account_id,
                     provider_name=provider_name,
                     external_event_id=external_event.external_id,
-                    external_calendar_id=external_event.external_calendar_id,
-                    external_calendar_name=external_event.external_calendar_name,
+                    calendar_id=external_event.external_calendar_id,
+                    calendar_name=external_event.external_calendar_name,
                     title=external_event.title,
                     description=external_event.description,
                     location=external_event.location,
@@ -57,8 +57,8 @@ class CalendarEventRepository:
                 )
                 self.db.add(existing)
             else:
-                existing.external_calendar_id = external_event.external_calendar_id
-                existing.external_calendar_name = external_event.external_calendar_name
+                existing.calendar_id = external_event.external_calendar_id
+                existing.calendar_name = external_event.external_calendar_name
                 existing.title = external_event.title
                 existing.description = external_event.description
                 existing.location = external_event.location

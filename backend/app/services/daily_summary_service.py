@@ -7,8 +7,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.models.calendar_event import CalendarEvent
-from app.models.task_item import TaskItem
+from app.models.calendar_events import CalendarEvent
+from app.models.task_items import TaskItem
 from app.services.agenda_service import AgendaService
 
 

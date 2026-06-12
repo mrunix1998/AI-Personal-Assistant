@@ -1,299 +1,105 @@
-from datetime import date
-
-from fastapi import APIRouter, Depends, HTTPException, status
+import uuid
+from datetime import date, datetime, timezone
+import smtplib
+from email.message import EmailMessage
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-
 from app.api.deps import get_current_access_token, get_current_user
 from app.crud.notification_channels import NotificationChannelRepository
+from app.crud.notifications import NotificationRepository
 from app.crud.provider_secrets import ProviderSecretRepository
+from app.crud.web_push import WebPushRepository
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.notifications import (
-    EmailConnectManual,
-    EmailDailyAgendaResponse,
-    EmailSMTPConfigCreate,
-    NotificationChannelCreate,
-    NotificationChannelRead,
-    TelegramConnectManual,
-    TelegramDailyAgendaResponse,
-)
-from app.schemas.provider_secrets import ProviderSecretCreate, ProviderSecretRead, TelegramBotTokenCreate
-from app.services.email_notification_service import EmailNotificationService, SMTPConfig
+from app.schemas.notifications import *
 from app.services.n8n_service import N8nWorkflowService
 from app.services.unified_agenda_service import UnifiedAgendaService
-
-router = APIRouter(prefix="/notifications", tags=["notifications"])
-
-
-@router.post("/telegram/bot-token", response_model=ProviderSecretRead, status_code=status.HTTP_201_CREATED)
-def save_telegram_bot_token(
-    payload: TelegramBotTokenCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> ProviderSecretRead:
-    secret_payload = ProviderSecretCreate(
-        provider="telegram",
-        secret_key="bot_token",
-        value=payload.bot_token,
-        display_name=payload.display_name,
-    )
-    return ProviderSecretRepository(db).upsert(user_id=current_user.id, payload=secret_payload)
-
-
-@router.post("/email/smtp-config", response_model=list[ProviderSecretRead], status_code=status.HTTP_201_CREATED)
-def save_email_smtp_config(
-    payload: EmailSMTPConfigCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> list[ProviderSecretRead]:
-    """Store SMTP credentials encrypted in DB.
-
-    For Gmail, use an App Password, not the normal account password.
-    Nothing is stored inside n8n workflow JSON.
-    """
-    repo = ProviderSecretRepository(db)
-    items = {
-        "smtp_host": payload.smtp_host,
-        "smtp_port": str(payload.smtp_port),
-        "smtp_username": payload.smtp_username,
-        "smtp_password": payload.smtp_password,
-        "smtp_from_email": payload.smtp_from_email,
-        "smtp_use_tls": "true" if payload.smtp_use_tls else "false",
-    }
-    saved = []
-    for key, value in items.items():
-        saved.append(
-            repo.upsert(
-                user_id=current_user.id,
-                payload=ProviderSecretCreate(
-                    provider="email",
-                    secret_key=key,
-                    value=value,
-                    display_name=payload.display_name,
-                ),
-            )
-        )
-    return saved
-
-
-@router.get("/secrets", response_model=list[ProviderSecretRead])
-def list_my_provider_secret_metadata(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> list[ProviderSecretRead]:
-    return ProviderSecretRepository(db).list_metadata(user_id=current_user.id)
-
-
-@router.post("/telegram/connect-manual", response_model=NotificationChannelRead, status_code=status.HTTP_201_CREATED)
-def connect_telegram_manual(
-    payload: TelegramConnectManual,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> NotificationChannelRead:
-    channel_payload = NotificationChannelCreate(
-        channel="telegram",
-        destination=payload.chat_id,
-        display_name=payload.display_name,
-        is_enabled=True,
-    )
-    return NotificationChannelRepository(db).upsert(user_id=current_user.id, payload=channel_payload)
-
-
-@router.post("/email/connect-manual", response_model=NotificationChannelRead, status_code=status.HTTP_201_CREATED)
-def connect_email_manual(
-    payload: EmailConnectManual,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> NotificationChannelRead:
-    channel_payload = NotificationChannelCreate(
-        channel="email",
-        destination=payload.email,
-        display_name=payload.display_name,
-        is_enabled=True,
-    )
-    return NotificationChannelRepository(db).upsert(user_id=current_user.id, payload=channel_payload)
-
+router=APIRouter(prefix="/notifications", tags=["notifications"])
 
 @router.get("/channels", response_model=list[NotificationChannelRead])
-def list_notification_channels(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> list[NotificationChannelRead]:
-    return NotificationChannelRepository(db).list_for_user(user_id=current_user.id)
+def channels(db:Session=Depends(get_db), current_user:User=Depends(get_current_user)): return NotificationChannelRepository(db).list_for_user(current_user.id)
 
+@router.get("/secrets", response_model=list[ProviderSecretRead])
+def secrets(db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
+    return [ProviderSecretRead(provider_name=s.provider, secret_name=s.key) for s in ProviderSecretRepository(db).list_for_user(current_user.id)]
 
-@router.post("/telegram/send-daily-agenda", response_model=TelegramDailyAgendaResponse)
-async def send_daily_agenda_to_telegram(
-    agenda_date: date,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    access_token: str = Depends(get_current_access_token),
-) -> TelegramDailyAgendaResponse:
-    telegram_channel = NotificationChannelRepository(db).get_enabled_channel(
-        user_id=current_user.id,
-        channel="telegram",
-    )
-    if telegram_channel is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Telegram is not connected yet. Add a chat_id with /notifications/telegram/connect-manual.",
-        )
+@router.post("/telegram/connect-manual", response_model=NotificationChannelRead, status_code=201)
+def telegram_connect(payload:TelegramConnectManual, db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
+    return NotificationChannelRepository(db).upsert(current_user.id,"telegram",payload.chat_id,payload.display_name)
+@router.post("/telegram/bot-token")
+def telegram_token(payload:TelegramBotTokenConfig, db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
+    ProviderSecretRepository(db).upsert(current_user.id,"telegram","bot_token",payload.bot_token); return {"status":"saved","provider":"telegram","secret":"bot_token"}
+@router.post("/telegram/send-daily-agenda")
+async def telegram_send(agenda_date:date, db:Session=Depends(get_db), current_user:User=Depends(get_current_user), access_token:str=Depends(get_current_access_token)):
+    chan=NotificationChannelRepository(db).get_enabled_channel(current_user.id,"telegram")
+    if not chan: raise HTTPException(400,"Telegram is not connected yet")
+    token=ProviderSecretRepository(db).get_value(current_user.id,"telegram","bot_token")
+    if not token: raise HTTPException(400,"Telegram bot_token is missing")
+    agenda=UnifiedAgendaService(db).build_daily_agenda(current_user.id,agenda_date)
+    msg=next(x.message for x in agenda.channel_messages if x.channel=="telegram")
+    res=await N8nWorkflowService().telegram_daily({"telegram_bot_token":token,"telegram_chat_id":chan.destination,"telegram_message":msg,"agenda_date":agenda_date.isoformat(),"user_id":str(current_user.id),"user_email":current_user.email,"access_token":access_token})
+    return {"status":"sent","channel_id":str(chan.id),"agenda_date":agenda_date.isoformat(),"n8n_response":res}
 
-    telegram_bot_token = ProviderSecretRepository(db).get_decrypted_value(
-        user_id=current_user.id,
-        provider="telegram",
-        secret_key="bot_token",
-    )
-    if telegram_bot_token is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Telegram bot token is not configured. Save it with /notifications/telegram/bot-token.",
-        )
+@router.post("/email/connect-manual", response_model=NotificationChannelRead, status_code=201)
+def email_connect(payload:EmailConnectManual, db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
+    return NotificationChannelRepository(db).upsert(current_user.id,"email",payload.email,payload.display_name)
+@router.post("/email/smtp-config")
+def email_smtp(payload:SmtpConfig, db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
+    repo=ProviderSecretRepository(db)
+    for k,v in payload.model_dump().items(): repo.upsert(current_user.id,"email",k,str(v))
+    return {"status":"saved","provider":"email","secrets":["smtp_host","smtp_port","smtp_username","smtp_password","smtp_from_email"]}
+@router.post("/email/send-daily-agenda")
+async def email_send(agenda_date:date, db:Session=Depends(get_db), current_user:User=Depends(get_current_user), access_token:str=Depends(get_current_access_token)):
+    chan=NotificationChannelRepository(db).get_enabled_channel(current_user.id,"email")
+    if not chan: raise HTTPException(400,"Email channel is not connected yet")
+    repo=ProviderSecretRepository(db); required=["smtp_host","smtp_port","smtp_username","smtp_password","smtp_from_email"]; secrets={k:repo.get_value(current_user.id,"email",k) for k in required}
+    missing=[k for k,v in secrets.items() if not v]
+    if missing: raise HTTPException(400,f"Email SMTP secret '{missing[0]}' is missing. Save SMTP config with /notifications/email/smtp-config.")
+    agenda=UnifiedAgendaService(db).build_daily_agenda(current_user.id,agenda_date)
+    email_msg=next(x for x in agenda.channel_messages if x.channel=="email")
+    msg=EmailMessage()
+    msg["From"]=secrets["smtp_from_email"]
+    msg["To"]=chan.destination
+    msg["Subject"]=email_msg.subject or f"Daily agenda for {agenda_date}"
+    msg.set_content(email_msg.message)
+    with smtplib.SMTP(secrets["smtp_host"], int(secrets["smtp_port"])) as smtp:
+        smtp.starttls()
+        smtp.login(secrets["smtp_username"], secrets["smtp_password"])
+        smtp.send_message(msg)
+    return {"status":"sent","channel_id":str(chan.id),"agenda_date":agenda_date.isoformat(),"email_response":{"ok":True,"source":"backend_smtp"}}
+@router.post("/email/send-direct")
+async def email_direct(to_email:str, subject:str, message:str, db:Session=Depends(get_db), current_user:User=Depends(get_current_user), access_token:str=Depends(get_current_access_token)):
+    repo=ProviderSecretRepository(db); secrets={k:repo.get_value(current_user.id,"email",k) for k in ["smtp_host","smtp_port","smtp_username","smtp_password","smtp_from_email"]}
+    msg=EmailMessage(); msg["From"]=secrets["smtp_from_email"]; msg["To"]=to_email; msg["Subject"]=subject; msg.set_content(message)
+    with smtplib.SMTP(secrets["smtp_host"], int(secrets["smtp_port"])) as smtp:
+        smtp.starttls(); smtp.login(secrets["smtp_username"], secrets["smtp_password"]); smtp.send_message(msg)
+    return {"status":"sent","email_response":{"ok":True,"source":"backend_smtp"}}
 
-    agenda = UnifiedAgendaService(db).build_daily_agenda(
-        user_id=current_user.id,
-        agenda_date=agenda_date,
-    )
+@router.post("/center", response_model=NotificationRead)
+def create_notification(payload:NotificationCreate, db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
+    return NotificationRepository(db).create(current_user.id,payload.title,payload.message,payload.source,payload.channel)
+@router.get("/center", response_model=list[NotificationRead])
+def list_notifications(db:Session=Depends(get_db), current_user:User=Depends(get_current_user)): return NotificationRepository(db).list_for_user(current_user.id)
+@router.post("/center/daily-agenda")
+def daily_notification(agenda_date:date, db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
+    agenda=UnifiedAgendaService(db).build_daily_agenda(current_user.id,agenda_date); web_msg=next(x for x in agenda.channel_messages if x.channel=="web")
+    dt=datetime.combine(agenda_date, datetime.min.time(), tzinfo=timezone.utc)
+    notif=NotificationRepository(db).create(current_user.id,web_msg.subject or "Daily Agenda",web_msg.message,"unified_agenda","web",dt)
+    subs=WebPushRepository(db).list_for_user(current_user.id)
+    return {"status":"created","notification":NotificationRead.model_validate(notif),"web_push":{"status":"simulated","subscription_count":len(subs),"title":notif.title,"message":notif.message}}
+@router.post("/center/{notification_id}/read", response_model=NotificationRead)
+def read_notification(notification_id:uuid.UUID, db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
+    obj=NotificationRepository(db).mark_read(current_user.id,notification_id)
+    if not obj: raise HTTPException(404,"Notification not found")
+    return obj
+@router.post("/center/read-all")
+def read_all(db:Session=Depends(get_db), current_user:User=Depends(get_current_user)): return {"updated_count":NotificationRepository(db).mark_all_read(current_user.id)}
+@router.delete("/center/{notification_id}")
+def delete_notification(notification_id:uuid.UUID): return {"deleted":False,"detail":"Delete not implemented in MVP"}
 
-    try:
-        n8n_response = await N8nWorkflowService().trigger_telegram_daily_agenda_workflow(
-            user_id=current_user.id,
-            user_email=current_user.email,
-            agenda_date=agenda_date,
-            access_token=access_token,
-            telegram_chat_id=telegram_channel.destination,
-            telegram_bot_token=telegram_bot_token,
-            unified_agenda=agenda.model_dump(mode="json"),
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Could not send Telegram daily agenda via n8n: {exc}",
-        ) from exc
-
-    return TelegramDailyAgendaResponse(
-        status="sent",
-        channel_id=telegram_channel.id,
-        agenda_date=agenda_date.isoformat(),
-        n8n_response=n8n_response,
-    )
-
-
-@router.post("/email/send-daily-agenda", response_model=EmailDailyAgendaResponse)
-async def send_daily_agenda_email_via_n8n(
-    agenda_date: date,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    access_token: str = Depends(get_current_access_token),
-) -> EmailDailyAgendaResponse:
-    """Trigger n8n email workflow.
-
-    n8n does not store or receive SMTP secrets. It calls the protected backend direct-send
-    endpoint, and the backend reads encrypted SMTP credentials from the DB.
-    """
-    if NotificationChannelRepository(db).get_enabled_channel(user_id=current_user.id, channel="email") is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email is not connected yet. Add recipient with /notifications/email/connect-manual.",
-        )
-    _ensure_smtp_configured(db=db, user_id=current_user.id)
-
-    try:
-        n8n_response = await N8nWorkflowService().trigger_email_daily_agenda_workflow(
-            user_id=current_user.id,
-            user_email=current_user.email,
-            agenda_date=agenda_date,
-            access_token=access_token,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Could not send Email daily agenda via n8n: {exc}",
-        ) from exc
-
-    return EmailDailyAgendaResponse(
-        status="sent",
-        channel_id=None,
-        agenda_date=agenda_date.isoformat(),
-        n8n_response=n8n_response,
-    )
-
-
-@router.post("/email/send-direct", response_model=EmailDailyAgendaResponse)
-def send_daily_agenda_email_direct(
-    agenda_date: date,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> EmailDailyAgendaResponse:
-    """Protected endpoint used by n8n. Also useful for local debugging."""
-    email_channel = NotificationChannelRepository(db).get_enabled_channel(
-        user_id=current_user.id,
-        channel="email",
-    )
-    if email_channel is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email is not connected yet. Add recipient with /notifications/email/connect-manual.",
-        )
-
-    smtp_config = _load_smtp_config(db=db, user_id=current_user.id)
-    agenda = UnifiedAgendaService(db).build_daily_agenda(user_id=current_user.id, agenda_date=agenda_date)
-    email_message = next(
-        (message for message in agenda.channel_messages if message.channel == "email"),
-        None,
-    )
-    subject = email_message.subject if email_message and email_message.subject else f"Daily agenda for {agenda_date.isoformat()}"
-    text_body = email_message.message if email_message else f"Your daily agenda for {agenda_date.isoformat()} is ready."
-
-    try:
-        email_response = EmailNotificationService().send_daily_agenda_email(
-            smtp_config=smtp_config,
-            to_email=email_channel.destination,
-            subject=subject,
-            text_body=text_body,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Could not send email via SMTP: {exc}",
-        ) from exc
-
-    return EmailDailyAgendaResponse(
-        status="sent",
-        channel_id=email_channel.id,
-        agenda_date=agenda_date.isoformat(),
-        email_response=email_response,
-    )
-
-
-def _ensure_smtp_configured(*, db: Session, user_id) -> None:
-    _load_smtp_config(db=db, user_id=user_id)
-
-
-def _load_smtp_config(*, db: Session, user_id) -> SMTPConfig:
-    repo = ProviderSecretRepository(db)
-
-    def get_required(key: str) -> str:
-        value = repo.get_decrypted_value(user_id=user_id, provider="email", secret_key=key)
-        if value is None or value == "":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Email SMTP secret '{key}' is missing. Save SMTP config with /notifications/email/smtp-config.",
-            )
-        return value
-
-    smtp_host = get_required("smtp_host")
-    smtp_port = int(get_required("smtp_port"))
-    smtp_username = get_required("smtp_username")
-    smtp_password = get_required("smtp_password")
-    smtp_from_email = get_required("smtp_from_email")
-    smtp_use_tls = get_required("smtp_use_tls").lower() in {"1", "true", "yes", "on"}
-
-    return SMTPConfig(
-        host=smtp_host,
-        port=smtp_port,
-        username=smtp_username,
-        password=smtp_password,
-        from_email=smtp_from_email,
-        use_tls=smtp_use_tls,
-    )
+@router.post("/web-push/subscriptions", response_model=WebPushSubscriptionRead)
+def web_push_subscribe(payload:WebPushSubscriptionCreate, db:Session=Depends(get_db), current_user:User=Depends(get_current_user)): return WebPushRepository(db).upsert(current_user.id,payload)
+@router.get("/web-push/subscriptions", response_model=list[WebPushSubscriptionRead])
+def web_push_list(db:Session=Depends(get_db), current_user:User=Depends(get_current_user)): return WebPushRepository(db).list_for_user(current_user.id)
+@router.delete("/web-push/subscriptions/{subscription_id}")
+def web_push_delete(subscription_id:uuid.UUID, db:Session=Depends(get_db), current_user:User=Depends(get_current_user)): return {"deleted":WebPushRepository(db).delete(current_user.id,subscription_id)}

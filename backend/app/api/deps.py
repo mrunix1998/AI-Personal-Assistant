@@ -1,33 +1,25 @@
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+import uuid
+from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
-
-from app.core.config import get_settings
 from app.core.security import decode_access_token
 from app.crud.users import UserRepository
 from app.db.session import get_db
 from app.models.user import User
 
-settings = get_settings()
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.api_v1_prefix}/auth/login")
+def get_current_access_token(authorization: str | None = Header(default=None)) -> str:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
+    return authorization.split(" ", 1)[1]
 
-
-def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
-) -> User:
-    user_id = decode_access_token(token)
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    user = UserRepository(db).get_by_id(user_id)
-    if user is None:
+def get_current_user(token: str = Depends(get_current_access_token), db: Session = Depends(get_db)) -> User:
+    payload = decode_access_token(token)
+    if not payload or "sub" not in payload:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    try:
+        user_id = uuid.UUID(payload["sub"])
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    user = UserRepository(db).get(user_id)
+    if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user
-
-
-def get_current_access_token(token: str = Depends(oauth2_scheme)) -> str:
-    return token

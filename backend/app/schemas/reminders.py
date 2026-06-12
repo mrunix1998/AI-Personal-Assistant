@@ -1,27 +1,12 @@
 from datetime import datetime
-from uuid import UUID
-
-from pydantic import BaseModel, Field
-
+from pydantic import BaseModel
+import uuid
 
 class ReminderRead(BaseModel):
-    id: UUID
+    id: uuid.UUID
     title: str
     message: str
-    scheduled_for: datetime
+    channel: str
     status: str
-
+    remind_at: datetime
     model_config = {"from_attributes": True}
-
-
-class GenerateRemindersResponse(BaseModel):
-    agenda_date: str
-    lead_minutes: int
-    created_count: int
-    skipped_count: int
-    reminders: list[ReminderRead]
-
-
-class ReminderSimulationResponse(BaseModel):
-    sent_count: int
-    reminders: list[ReminderRead]

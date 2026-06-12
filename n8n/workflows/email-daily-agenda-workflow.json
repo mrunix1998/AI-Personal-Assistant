@@ -1,0 +1,12 @@
+{
+  "name": "Email Daily Agenda Sender - Secure SMTP",
+  "nodes": [
+    {"parameters": {"httpMethod": "POST", "path": "email-daily-agenda", "responseMode": "lastNode", "options": {}}, "id": "webhook", "name": "Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [0, 0]},
+    {"parameters": {"jsCode": "const b = $json.body || $json;\nreturn [{ json: {\n smtp_host: b.smtp_host, smtp_port: Number(b.smtp_port || 587), smtp_username: b.smtp_username, smtp_password: b.smtp_password, smtp_from_email: b.smtp_from_email, to_email: b.to_email, subject: b.subject || 'Daily Agenda', message: String(b.message || '')\n}}];"}, "id": "prepare", "name": "Prepare Email", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [220, 0]},
+    {"parameters": {"fromEmail": "={{$json.smtp_from_email}}", "toEmail": "={{$json.to_email}}", "subject": "={{$json.subject}}", "text": "={{$json.message}}", "options": {}}, "id": "send", "name": "Send Email SMTP", "type": "n8n-nodes-base.emailSend", "typeVersion": 2.1, "position": [460, 0], "credentials": {}},
+    {"parameters": {"jsCode": "return [{ json: { status: 'sent', source: 'n8n_email_daily_agenda' } }];"}, "id": "response", "name": "Return Response", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [700, 0]}
+  ],
+  "connections": {"Webhook": {"main": [[{"node": "Prepare Email", "type": "main", "index": 0}]]}, "Prepare Email": {"main": [[{"node": "Send Email SMTP", "type": "main", "index": 0}]]}, "Send Email SMTP": {"main": [[{"node": "Return Response", "type": "main", "index": 0}]]}},
+  "active": false,
+  "settings": {"executionOrder": "v1"}
+}

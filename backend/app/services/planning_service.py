@@ -7,7 +7,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.models.planning_result import PlanningResult
-from app.models.task_item import TaskItem
+from app.models.task_items import TaskItem
 from app.services.agenda_service import AgendaService
 from app.services.daily_summary_service import DailySummaryService, FreeSlot, _format_clock
 

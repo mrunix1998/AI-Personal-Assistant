@@ -1,19 +1,27 @@
 services:
-  postgres:
+  db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: assistant
-      POSTGRES_PASSWORD: assistant
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
       POSTGRES_DB: assistant_db
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+    ports: ["5432:5432"]
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d assistant_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   n8n:
     image: n8nio/n8n:2.25.5
@@ -30,29 +38,77 @@ services:
       N8N_BASIC_AUTH_ACTIVE: "true"
       N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
       N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-admin123456}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
     volumes:
       - n8n_data:/home/node/.n8n
       - ./n8n/workflows:/workflows
     depends_on:
-      - postgres
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   backend:
     build:
       context: ./backend
     env_file:
       - ./backend/.env
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: /app/start.sh
+    environment:
+      UVICORN_EXTRA_ARGS: "--reload"
+      RUN_MIGRATIONS: "true"
     volumes:
       - ./backend:/app
+      - ./backups:/backups
     ports:
       - "8000:8000"
     depends_on:
-      - postgres
-      - redis
-      - n8n
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      n8n:
+        condition: service_started
+
+  worker:
+    build:
+      context: ./backend
+    env_file:
+      - ./backend/.env
+    command: celery -A app.workers.celery_app.celery_app worker --loglevel=INFO
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  scheduler:
+    build:
+      context: ./backend
+    env_file:
+      - ./backend/.env
+    command: celery -A app.workers.celery_app.celery_app beat --loglevel=INFO
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      worker:
+        condition: service_started
+
+  frontend:
+    build: ./frontend
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
+    ports: ["3000:3000"]
+    depends_on:
+      backend:
+        condition: service_started
 
 volumes:
   postgres_data:
